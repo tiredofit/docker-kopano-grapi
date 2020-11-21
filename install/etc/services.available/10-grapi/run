@@ -1,0 +1,168 @@
+#!/usr/bin/with-contenv bash
+
+source /assets/functions/00-container
+prepare_service both
+
+PROCESS_NAME="grapi"
+check_container_initialized
+liftoff
+set -x
+parse_config "${CONFIG_PATH}""${GRAPI_CONFIG_FILE}"
+
+EXTRA_PYTHONPATH=/usr/lib/kopano/python3-extras/lib/python3.7/site-packages/
+default_socket_path=/var/run/kopano-grapi
+default_num_workers=8
+default_pid_file=${default_socket_path}/grapi.pid
+default_storage_server_socket=file:///var/run/kopano/server.sock
+default_persistency_path=
+
+## Backend
+case "${GRAPI_BACKEND}" in
+	"CALDAV" | "caldav" )
+		grapi_backend="caldav"
+		if [ -n "$CALDAV_HOST" ] ; then
+			export CALDAV_SERVER="${CALDAV_HOST}"
+		fi
+		if [ -n "$CALDAV_USER" ] ; then
+			export GRAPI_USER="${CALDAV_USER}"
+		fi
+		if [ -n "$CALDAV_PASS" ] ; then
+			export GRAPI_PASS="${CALDAV_PASS}"
+		fi
+	;;
+	"KOPANO" | "kopano" | "KC" | "kc" )
+		grapi_backend="kopano"
+	;;
+	"IMAP" | "imap" )
+		grapi_backend="imap"
+		if [ -n "$IMAP_HOST" ] ; then
+			export IMAP_SERVER="${IMAP_HOST}"
+		fi
+		if [ -n "$IMAP_USER" ] ; then
+			export GRAPI_USER="${IMAP_USER}"
+		fi
+		if [ -n "$IMAP_PASS" ] ; then
+			export GRAPI_PASS="${IMAP_PASS}"
+		fi
+	;;
+	"LDAP" | "ldap" | "openldap" | "OPENLDAP" )
+		grapi_backend="LDAP"
+
+		if [ -n "$LDAP_URI" ]; then
+			export LDAP_URI="${LDAP_URI}"
+		fi
+		if [ -n "$LDAP_BIND_DN" ]; then
+			export LDAP_BINDDN="${LDAP_BIND_DN}}"
+		fi
+		if [ -n "$LDAP_BIND_PASS" ]; then
+			export LDAP_BINDPW="${LDAP_BIND_PASS}"
+		fi
+		if [ -n "$LDAP_BASE_DN" ]; then
+			export LDAP_BASEDN="${LDAP_BASE_DN}"
+		fi
+		if [ -n "$LDAP_SCOPE" ]; then
+			export LDAP_SCOPE="${LDAP_SCOPE}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_LOGIN" ]; then
+			export LDAP_LOGIN_ATTRIBUTE="${LDAP_ATTRIBUTE_LOGIN}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_MAIL" ]; then
+			export LDAP_EMAIL_ATTRIBUTE="${LDAP_ATTRIBUTE_MAIL}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_NAME" ]; then
+			export LDAP_NAME_ATTRIBUTE="${LDAP_ATTRIBUTE_NAME}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_SURNAME" ]; then
+			export LDAP_FAMILY_NAME_ATTRIBUTE="${LDAP_ATTRIBUTE_SURNAME}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_GIVENNAME" ]; then
+			export LDAP_GIVEN_NAME_ATTRIBUTE="${LDAP_ATTRIBUTE_GIVENNAME}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_TITLE" ]; then
+			export LDAP_JOB_TITLE_ATTRIBUTE="${LDAP_ATTRIBUTE_TITLE}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_OFFICE_LOCATION" ]; then
+			export LDAP_OFFICE_LOCATION_ATTRIBUTE="${LDAP_ATTRIBUTE_OFFICE_LOCATION}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_PHONE_BUSINESS" ]; then
+			export LDAP_BUSINESS_PHONE_ATTRIBUTE="${LDAP_ATTRIBUTE_PHONE_BUSINESS}"
+		fi
+		if [ -n "$LDAP_ATTRIBUTE_PHONE_MOBILE" ]; then
+			export LDAP_MOBILE_PHONE_ATTRIBUTE="${LDAP_ATTRIBUTE_PHONE_MOBILE}"
+		fi
+		if [ -n "$LDAP_FILTER_USER_SEARCH" ]; then
+			export USERID_SEARCH_FILTER_TEMPLATE="${LDAP_FILTER_USER_SEARCH}"
+		fi
+		if [ -n "$LDAP_FILTER_SEARCH_SEARCH" ]; then
+			export SEARCH_SEARCH_FILTER_TEMPLATE="${LDAP_FILTER_SEARCH_SEARCH}"
+		fi
+	;;
+	* )
+		grapi_backend="kopano"
+	;;
+esac
+
+export GRAPI_BACKEND=${grapi_backend}
+
+## Socket Info
+if [ -z "$socket_path" ]; then
+	socket_path="${default_socket_path}"
+fi
+
+## Worker Processes
+if [ -z "$num_workers" ]; then
+	num_workers=${default_num_workers}
+fi
+
+## Pid File
+if [ -z "$pid_file" ]; then
+	pid_file="${default_pid_file}"
+fi
+
+## Kopano Socket
+if [ -z "$server_socket" ]; then
+	server_socket="${default_storage_server_socket}"
+fi
+
+## TLS Verification
+if [ "$insecure" = "yes" ]; then
+	set -- "$@" --insecure
+fi
+
+## Experimental Endpoints
+if [ "$enable_experimental_endpoints" = "yes" ]; then
+	set -- "$@" --enable-experimental-endpoints
+fi
+
+## Data Persistency
+if [ -z "$persistency_path" ]; then
+	persistency_path="${default_persistency_path}"
+fi
+
+## Logging
+if [ -n "$log_level" ]; then
+	set -- "$@" --log-level="$log_level"
+fi
+
+## Build Arguments
+set -- "$@" --socket-path="$socket_path" --workers="$num_workers" --pid-file="$pid_file" --process-name="grapi"
+
+export KOPANO_SOCKET="$server_socket"
+
+if [ -n "$persistency_path" ]; then
+	export GRAPI_PERSISTENCY_PATH="$persistency_path"
+fi
+
+if [ -n "${EXTRA_PYTHONPATH}" ]; then
+	export PYTHONPATH="${EXTRA_PYTHONPATH}:${PYTHONPATH}"
+fi
+
+#wait_for_server grapi
+
+print_info "Starting Kopano GRAPI Service"
+if [ "${LOG_TYPE}" = "FILE" ] || [ "${LOG_TYPE}" = "file" ] ; then
+	if [ "${LOG_FILE}" = "/dev/null" ] ; then unset "${LOG_PATH}" ; fi;
+	/usr/bin/kopano-grapi-mfr "$@" 2>> "${LOG_PATH}""${LOG_FILE}"
+else
+	/usr/bin/kopano-grapi-mfr "$@"
+fi

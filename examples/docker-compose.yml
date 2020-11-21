@@ -1,0 +1,31 @@
+version: '2.4'
+services:
+
+  grapi-app:
+    image: tiredofit/kopano-grapi:latest
+    container_name: grapi-app
+    volumes:
+      - ./logs/grapi:/logs
+      - ./data:/data
+      - ./config:/config
+      - ./certs:/certs
+      - ./assets/custom:/assets/custom
+      - ./sockets:/var/run/kopano-grapi
+    environment:
+      - TIMEZONE=America/Vancouver
+      - CONTAINER_LOG_LEVEL=DEBUG
+      - DEBUG_MODE=FALSE
+      - LOG_LEVEL=DEBUG
+
+     ### GRAPI
+      - GRAPI_SOCKET_SERVER=https://kopano:237
+
+      - GRAPI_BACKEND=KOPANO
+
+    networks:
+      - services
+    restart: always
+
+networks:
+  services:
+    external: true

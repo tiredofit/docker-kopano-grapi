@@ -1,0 +1,92 @@
+FROM tiredofit/alpine:3.12 as grapi-builder
+
+ARG GRAPI_REPO_URL
+ARG GRAPI_VERSION
+
+ENV GRAPI_REPO_URL=${GRAPI_REPO_URL:-"https://github.com/Kopano-dev/grapi"} \
+    GRAPI_VERSION=${GRAPI_VERSION:-"v10.5.0"}
+
+#ADD build-assets/kopano-grapi /build-assets
+
+RUN set -x && \
+    apk update && \
+    apk upgrade && \
+    apk add -t .grapi-build-deps \
+                build-base \
+                coreutils \
+                gettext \
+                git \
+                libev-dev \
+                db-dev \
+                python3-dev \
+                py-pip \
+                tar \
+                && \
+    \
+    pip3 install \
+                 bjoern \
+                 falcon \
+                 prometheus_client \
+                 validators && \
+    git clone ${GRAPI_REPO_URL} /usr/src/grapi && \
+    cd /usr/src/grapi && \
+    git checkout ${GRAPI_VERSION} && \
+    \
+    #if [ -d "/build-assets/src/grapi" ] ; then cp -R /build-assets/src/grapi/* /usr/src/grapi ; fi; \
+    #if [ -f "/build-assets/scripts/grapi.sh" ] ; then /build-assets/scripts/grapi.sh ; fi; \
+    #\
+    \
+    #sed -i "/MAPI/d" requirements.txt && \
+    #sed -i "/kopano/d" requirements.txt && \
+    python3 setup.py install && \
+    mkdir -p /rootfs/usr/src/grapi && \
+    cp -R dist/* /rootfs/usr/src/grapi && \
+    mkdir -p /rootfs/tiredofit/ && \
+    echo "GRAPI ${GRAPI_VERSION} built from ${GRAPI_REPO_URL} on $(date)" > /rootfs/tiredofit/grapi.version && \
+    echo "Commit: $(cd /usr/src/grapi ; echo $(git rev-parse HEAD))" >> /rootfs/tiredofit/grapi.version && \
+    cd /rootfs && \
+    tar cvfz /kopano-grapi.tar.gz . && \
+    cd / && \
+    apk del .grapi-build-deps && \
+    rm -rf /usr/src/* && \
+    rm -rf /var/cache/apk/* && \
+    rm -rf /rootfs
+
+FROM tiredofit/alpine:3.12
+LABEL maintainer="Dave Conroy (dave at tiredofit dot ca)"
+
+ENV ENABLE_SMTP=FALSE \
+    ZABBIX_HOSTNAME=grapi-app
+
+### Move Previously built files from builder image
+COPY --from=grapi-builder /*.tar.gz /usr/src/grapi/
+
+RUN set -x && \
+    apk update && \
+    apk upgrade && \
+    apk add -t .grapi-build-deps \
+                build-base \
+                db-dev \
+                libev-dev \
+                python3-dev \
+                py-pip \
+                py-setuptools \
+                py3-wheel \
+                && \
+    \
+    apk add -t .grapi-run-deps \
+                db \
+                python3 \
+                libev \
+                && \
+    \
+    ##### Unpack grapi
+    tar xvfz /usr/src/grapi/kopano-grapi.tar.gz -C / && \
+    python3 -m easy_install /usr/src/grapi/grapi*.egg
+    #rm -rf /usr/src/* && \
+    #rm -rf /etc/kopano && \
+    #ln -sf /config /etc/kopano && \
+    #apk del .grapi-build-deps && \
+    #rm -rf /var/cache/apk/*
+
+ADD install /
